@@ -1,20 +1,66 @@
-name: Python package
-
+name: Quality checks
 on:
+  workflow_dispatch:
+  pull_request:
   push:
     branches:
       - main
 
 jobs:
-  python:
-    runs-on: self-hosted
+  tests:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: |
-          docker compose build
-      - name: Run images
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Run image
+        uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: '1.8.2'
+      - name: Setup poetry dir
+        working-directory: ./tests
         run: |
           export AUTH_SECRET_KEY="${{ secrets.AUTH_SECRET_KEY }}" 
-          export DB_NAME="${{ secrets.DB_NAME }}"
-          docker compose up -d
+          export SERVER_PORT=8080
+          export AUTH_TOKEN_EXPIRE=15
+          export AUTH_REFRESH_TOKEN_EXPIRE=600
+          poetry install
+          poetry run pytest --cov ../backend/ --cov-branch --cov-fail-under ${{ env.COVERAGE_THRESHOLD }} ./test_backend/
+        env:
+          COVERAGE_THRESHOLD: 60
+  linters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: flake8 Lint
+        uses: py-actions/flake8@v2
+        with:
+          max-line-length: "120"
+      - uses: mdegis/bandit-action@v1.0
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: "."
+          level: high
+          confidence: high
+          exit_zero: true
+  qodana:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: 'Qodana Scan'
+        uses: JetBrains/qodana-action@v2023.3
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN }}
